@@ -1,0 +1,34 @@
+[
+  {
+    "name": "product_limit",
+    "endpoint": "/api/products",
+    "limit": 5,
+    "window": 60,
+    "algorithm": "fixed_window",
+    "active": true
+  },
+  {
+    "name": "user_limit",
+    "endpoint": "/api/users",
+    "limit": 10,
+    "window": 60,
+    "algorithm": "sliding_window",
+    "active": true
+  },
+  {
+    "name": "login_limit",
+    "endpoint": "/api/login",
+    "limit": 5,
+    "window": 300,
+    "algorithm": "fixed_window",
+    "active": true
+  },
+  {
+    "name": "ai_chat_limit",
+    "endpoint": "/api/ai/chat",
+    "limit": 5,
+    "window": 60,
+    "algorithm": "sliding_window",
+    "active": true
+  }
+]

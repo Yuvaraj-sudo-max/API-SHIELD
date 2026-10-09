@@ -1,0 +1,267 @@
+{
+  "info": {
+    "name": "API Shield - Postman Collection",
+    "_postman_id": "api-shield-v1-collection",
+    "description": "Postman testing collection for API Shield (Simple API Rate Limiting System) matching SRS Section 15 and Section 21.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:5000",
+      "type": "string"
+    },
+    {
+      "key": "api_key",
+      "value": "sk-fc02e982d5934be9a510598120f2b1df",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/health",
+          "host": ["{{base_url}}"],
+          "path": ["health"]
+        },
+        "description": "Unprotected system health and Redis connectivity check."
+      }
+    },
+    {
+      "name": "2. List Policies",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/policies",
+          "host": ["{{base_url}}"],
+          "path": ["api", "policies"]
+        },
+        "description": "Retrieve all active and inactive rate limiting policies."
+      }
+    },
+    {
+      "name": "3. Create Policy",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"orders_limit\",\n  \"endpoint\": \"/api/orders\",\n  \"limit\": 5,\n  \"window\": 60,\n  \"algorithm\": \"fixed_window\",\n  \"active\": true\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/policies",
+          "host": ["{{base_url}}"],
+          "path": ["api", "policies"]
+        },
+        "description": "Registers a new rate limiting policy with validation."
+      }
+    },
+    {
+      "name": "4. Get Single Policy",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/policies/product_limit",
+          "host": ["{{base_url}}"],
+          "path": ["api", "policies", "product_limit"]
+        },
+        "description": "Fetch configuration details for a single policy."
+      }
+    },
+    {
+      "name": "5. Update Policy",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"limit\": 10,\n  \"window\": 60,\n  \"algorithm\": \"fixed_window\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/policies/product_limit",
+          "host": ["{{base_url}}"],
+          "path": ["api", "policies", "product_limit"]
+        },
+        "description": "Updates limit, window, or algorithm of an existing policy."
+      }
+    },
+    {
+      "name": "6. Deactivate Policy",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/policies/product_limit/deactivate",
+          "host": ["{{base_url}}"],
+          "path": ["api", "policies", "product_limit", "deactivate"]
+        },
+        "description": "Temporarily disables rate limiting for this policy."
+      }
+    },
+    {
+      "name": "7. Activate Policy",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/policies/product_limit/activate",
+          "host": ["{{base_url}}"],
+          "path": ["api", "policies", "product_limit", "activate"]
+        },
+        "description": "Re-enables rate limiting for this policy."
+      }
+    },
+    {
+      "name": "8. Test Protected Endpoint (Fixed Window - /api/products)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-API-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/products",
+          "host": ["{{base_url}}"],
+          "path": ["api", "products"]
+        },
+        "description": "Requests /api/products protected with fixed window (limit 5 / 60s). Send 6 times to observe HTTP 429."
+      }
+    },
+    {
+      "name": "9. Test Protected Endpoint (Sliding Window - /api/users)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-API-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/users",
+          "host": ["{{base_url}}"],
+          "path": ["api", "users"]
+        },
+        "description": "Requests /api/users protected with sliding window (limit 10 / 60s)."
+      }
+    },
+    {
+      "name": "10. Test Login Rate Limiting (POST /api/login)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-API-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"alice\",\n  \"password\": \"password123\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/login",
+          "host": ["{{base_url}}"],
+          "path": ["api", "login"]
+        },
+        "description": "Protects authentication against brute-force login attempts."
+      }
+    },
+    {
+      "name": "11. Recent Activity Logs & Status",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/logs",
+          "host": ["{{base_url}}"],
+          "path": ["api", "logs"]
+        },
+        "description": "Returns recent rate limiting decisions with masked API keys."
+      }
+    },
+    {
+      "name": "12. Protected AI Shield Gateway (POST /api/ai/chat)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-API-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"prompt\": \"Explain how API Shield rate limits LLM tokens.\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/ai/chat",
+          "host": ["{{base_url}}"],
+          "path": ["api", "ai", "chat"]
+        },
+        "description": "Rate-limited AI completion endpoint protected by sliding window policy (limit 5 / 60s) using DeepSeek."
+      }
+    },
+    {
+      "name": "13. Check DeepSeek AI Connection (GET /api/ai/status)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/ai/status",
+          "host": ["{{base_url}}"],
+          "path": ["api", "ai", "status"]
+        },
+        "description": "Verifies DeepSeek API connection and key status."
+      }
+    },
+    {
+      "name": "14. Autonomous AI Threat Assessment (POST /api/ai/analyze-threat)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/ai/analyze-threat",
+          "host": ["{{base_url}}"],
+          "path": ["api", "ai", "analyze-threat"]
+        },
+        "description": "Performs DeepSeek security audit over recent traffic logs."
+      }
+    }
+  ]
+}
