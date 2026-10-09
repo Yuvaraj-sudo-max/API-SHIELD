@@ -54,9 +54,14 @@ def test_invalid_policy_window():
 
 
 def test_invalid_policy_algorithm():
-    """T-07: Invalid policy - algorithm must be fixed_window or sliding_window."""
-    with pytest.raises(ValueError, match="Algorithm must be 'fixed_window' or 'sliding_window'"):
-        RateLimitRule(name="test", endpoint="/api/test", limit=5, window=60, algorithm="token_bucket")
+    """T-07: Invalid policy - algorithm must be fixed_window, sliding_window, or token_bucket."""
+    with pytest.raises(ValueError, match="Algorithm must be"):
+        RateLimitRule(name="test", endpoint="/api/test", limit=5, window=60, algorithm="unsupported_algorithm")
+
+    # token_bucket is a supported, valid algorithm
+    rule = RateLimitRule(name="test_tb", endpoint="/api/test", limit=5, window=60, algorithm="token_bucket")
+    assert rule.algorithm == "token_bucket"
+
 
 
 def test_policy_manager_create_and_duplicate():

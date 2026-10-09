@@ -347,10 +347,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const path = endpointSelect.value;
     const key = apiKeyInput.value.trim();
     const body = jsonBodyInput.value.trim();
+    const clientTierSelect = document.getElementById('client-tier-select');
+    const tier = clientTierSelect ? clientTierSelect.value : 'free';
 
     let cmd = `curl -X ${method} "http://127.0.0.1:5000${path}"`;
     if (key) {
       cmd += ` \\\n  -H "X-API-Key: ${key}"`;
+    }
+    if (tier && tier !== 'free') {
+      cmd += ` \\\n  -H "X-Client-Tier: ${tier}"`;
     }
     if ((method === 'POST' || method === 'PUT') && body) {
       cmd += ` \\\n  -H "Content-Type: application/json" \\\n  -d '${body}'`;
@@ -435,6 +440,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const headers = {};
     if (apiKey) {
       headers['X-API-Key'] = apiKey;
+    }
+    const clientTierSelect = document.getElementById('client-tier-select');
+    const tier = clientTierSelect ? clientTierSelect.value : 'free';
+    if (tier && tier !== 'free') {
+      headers['X-Client-Tier'] = tier;
     }
 
     // Step 1: Identity Resolution
@@ -562,8 +572,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const opt = endpointSelect.selectedOptions[0];
     if (opt) {
       quotaWindowVal.textContent = `${opt.dataset.window || '60'}s`;
-      quotaAlgoVal.textContent = opt.dataset.algo === 'sliding_window' ? 'Sliding Window (ZSET)' : 'Fixed Window (INCR)';
-      hudActiveAlgorithm.textContent = opt.dataset.algo ? opt.dataset.algo.toUpperCase() : 'SLIDING WINDOW';
+      if (opt.dataset.algo === 'token_bucket') {
+        quotaAlgoVal.textContent = 'Token Bucket (BURST/REFILL)';
+        hudActiveAlgorithm.textContent = 'TOKEN BUCKET';
+      } else if (opt.dataset.algo === 'sliding_window') {
+        quotaAlgoVal.textContent = 'Sliding Window (ZSET)';
+        hudActiveAlgorithm.textContent = 'SLIDING WINDOW';
+      } else {
+        quotaAlgoVal.textContent = 'Fixed Window (INCR)';
+        hudActiveAlgorithm.textContent = 'FIXED WINDOW';
+      }
     }
 
     const pct = Math.max(0, Math.min(1, r / l));
@@ -1078,6 +1096,25 @@ document.addEventListener('DOMContentLoaded', () => {
         navLoginText.textContent = `${authUser.user.toUpperCase()} // CLEARANCE`;
       }
     } catch (e) {}
+  }
+
+  const clientTierSelect = document.getElementById('client-tier-select');
+  const tierMultiplierPreview = document.getElementById('tier-multiplier-preview');
+  if (clientTierSelect && tierMultiplierPreview) {
+    clientTierSelect.addEventListener('change', () => {
+      const val = clientTierSelect.value;
+      if (val === 'enterprise') {
+        tierMultiplierPreview.textContent = '10.0x QUOTA MULTIPLIER';
+        tierMultiplierPreview.style.color = '#c084fc';
+      } else if (val === 'pro') {
+        tierMultiplierPreview.textContent = '3.0x QUOTA MULTIPLIER';
+        tierMultiplierPreview.style.color = '#38bdf8';
+      } else {
+        tierMultiplierPreview.textContent = '1.0x BASE QUOTA';
+        tierMultiplierPreview.style.color = '#34d399';
+      }
+      updateCurlCommand();
+    });
   }
 
   updateKeyMaskDisplay();

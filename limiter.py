@@ -52,6 +52,40 @@ def sliding_window_allowed(redis_client: Any, key: str, limit: int, window: int)
     return count <= limit
 
 
+def token_bucket_allowed(
+    redis_client: Any, key: str, limit: int, window: int, capacity: int = None
+) -> bool:
+    """
+    Token Bucket implementation.
+    Allows bursts up to capacity while refilling smoothly at limit/window tokens per second.
+    """
+    cap = capacity if capacity is not None else limit
+    now = time.time()
+    rate = limit / float(window)
+    redis_key = f"tb:{key}"
+
+    data = redis_client.hgetall(redis_key)
+    if data:
+        raw_tokens = data.get("tokens") or data.get(b"tokens")
+        raw_last = data.get("last_updated") or data.get(b"last_updated")
+        tokens = float(raw_tokens) if raw_tokens is not None else float(cap)
+        last_updated = float(raw_last) if raw_last is not None else now
+        elapsed = max(0.0, now - last_updated)
+        tokens = min(float(cap), tokens + elapsed * rate)
+    else:
+        tokens = float(cap)
+
+    if tokens >= 1.0:
+        tokens -= 1.0
+        redis_client.hset(redis_key, mapping={"tokens": str(tokens), "last_updated": str(now)})
+        redis_client.expire(redis_key, int(window * 2 + 10))
+        return True
+    else:
+        redis_client.hset(redis_key, mapping={"tokens": str(tokens), "last_updated": str(now)})
+        redis_client.expire(redis_key, int(window * 2 + 10))
+        return False
+
+
 class RateLimiter:
     """
     RateLimiter class (SRS Section 11 & 14.2).
@@ -78,6 +112,12 @@ class RateLimiter:
         Sliding window rate-limiting check returning boolean (SRS 14.2).
         """
         return sliding_window_allowed(self.redis_client, key, limit, window)
+
+    def token_bucket(self, key: str, limit: int, window: int, capacity: int = None) -> bool:
+        """
+        Token bucket rate-limiting check returning boolean.
+        """
+        return token_bucket_allowed(self.redis_client, key, limit, window, capacity)
 
     def check_fixed_window(self, key: str, limit: int, window: int) -> RateLimitResult:
         """
@@ -139,6 +179,50 @@ class RateLimiter:
             count=count,
         )
 
+    def check_token_bucket(
+        self, key: str, limit: int, window: int, capacity: int = None
+    ) -> RateLimitResult:
+        """
+        Token bucket check with full metrics (remaining count, retry-after).
+        """
+        cap = capacity if capacity is not None else limit
+        now = time.time()
+        rate = limit / float(window)
+        redis_key = f"tb:{key}"
+
+        data = self.redis_client.hgetall(redis_key)
+        if data:
+            raw_tokens = data.get("tokens") or data.get(b"tokens")
+            raw_last = data.get("last_updated") or data.get(b"last_updated")
+            tokens = float(raw_tokens) if raw_tokens is not None else float(cap)
+            last_updated = float(raw_last) if raw_last is not None else now
+            elapsed = max(0.0, now - last_updated)
+            tokens = min(float(cap), tokens + elapsed * rate)
+        else:
+            tokens = float(cap)
+
+        allowed = tokens >= 1.0
+        if allowed:
+            tokens -= 1.0
+            retry_after = 0
+        else:
+            # Time until 1 full token is refilled
+            retry_after = max(1, int((1.0 - tokens) / rate + 0.999))
+
+        self.redis_client.hset(redis_key, mapping={"tokens": str(tokens), "last_updated": str(now)})
+        self.redis_client.expire(redis_key, int(window * 2 + 10))
+
+        remaining = int(tokens)
+        count = int(cap - tokens)
+
+        return RateLimitResult(
+            allowed=allowed,
+            limit=limit,
+            remaining=remaining,
+            retry_after=retry_after,
+            count=count,
+        )
+
     def is_allowed(
         self, client_id: str, endpoint: str, policy: RateLimitRule
     ) -> RateLimitResult:
@@ -149,4 +233,6 @@ class RateLimiter:
         key = policy.get_key(client_id)
         if policy.algorithm == "sliding_window":
             return self.check_sliding_window(key, policy.limit, policy.window)
+        elif policy.algorithm == "token_bucket":
+            return self.check_token_bucket(key, policy.limit, policy.window)
         return self.check_fixed_window(key, policy.limit, policy.window)

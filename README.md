@@ -1,123 +1,156 @@
-# API Shield — Simple API Rate Limiting System
+# API Shield — 3D Intelligent Rate Limiting & Abuse Prevention Gateway
 
-API Shield is a modular Python & Flask API protection gateway that monitors and controls client request volume across protected endpoints. It prevents excessive requests, unintentional denial-of-service, brute-force login attempts, and simple API abuse using **Redis** storage, **Fixed Window** and **Sliding Window** rate-limiting algorithms, and an automated **tiered temporary blocking** mechanism.
+[![API Shield CI](https://github.com/Yuvaraj-sudo-max/API-SHIELD/actions/workflows/ci.yml/badge.svg)](https://github.com/Yuvaraj-sudo-max/API-SHIELD/actions/workflows/ci.yml)
+![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)
+![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)
+![Redis](https://img.shields.io/badge/redis-7.x-DC382D?logo=redis&logoColor=white)
+![DeepSeek](https://img.shields.io/badge/AI-DeepSeek%20LLM-4f46e5)
+![License](https://img.shields.io/badge/license-MIT-green)
+
+API Shield is an enterprise-grade API gateway and rate-limiting system designed to protect modern microservices and LLM endpoints against traffic spikes, bot attacks, and volumetric API abuse. Featuring a **3D Three.js holographic command matrix**, deep integration with **DeepSeek AI**, multi-tenant client tiering, and native **Prometheus telemetry**, API Shield delivers high-throughput traffic shaping with zero external database dependencies when running in standalone mode.
 
 ---
 
-## 📁 Project Architecture & Structure
+## 🌟 Key Capabilities
+
+- **3 Core Rate Limiting Algorithms**:
+  - **Fixed Window** (`INCR` + TTL atomic counters for high-throughput simplicity).
+  - **Sliding Window** (Redis `ZSET` precision sliding log preventing boundary bursts).
+  - **Token Bucket** (Continuous fractional token refill with burst capacity control).
+- **Multi-Tenant Client Tiering**:
+  - Dynamically scales request allowances based on client tier (`Free`: 1.0x, `Pro`: 3.0x, `Enterprise`: 10.0x).
+  - Injects `X-Client-Tier` headers and adapts quotas dynamically.
+- **DeepSeek AI Security Copilot**:
+  - **AI Rate-Limited LLM Gateway**: `/api/ai/chat` protected by sliding-window policies.
+  - **Autonomous Threat Auditor**: Analyzes security audit streams to identify abusive traffic patterns.
+  - **Policy Synthesis Copilot**: Generates structured rate limit policies from natural language intent.
+- **Tiered Abuse Defense & Penalty Box**:
+  - Progressively escalates block penalties for repeated violators (1st: 60s, 2nd: 300s, 3rd+: 1800s).
+- **Prometheus Telemetry (`/metrics`)**:
+  - Standard Prometheus exposition metrics for requests, rate limits, active policies, and AI completions.
+- **Production Ready Containerization**:
+  - High-performance Gunicorn WSGI server, multi-stage Docker container, and 1-command `docker-compose.yml`.
+
+---
+
+## 📁 Project Architecture
 
 ```
 api_shield/
-│
-├── app.py                  # Application factory and server bootstrap
-├── config.py               # Environment configuration settings
-├── routes.py               # API route definitions and rate-limiting middleware
-├── identity.py             # Client identification (API key / IP) & masking
-├── policy.py               # RateLimitRule model and PolicyManager CRUD
-├── limiter.py              # Fixed and Sliding window algorithms
-├── redis_store.py          # Redis client abstraction with automatic FakeRedis fallback
-├── blocking.py             # BlockManager with tiered temporary blocking logic
-├── logging_utils.py        # Request decision logging with masked client IDs
-├── requirements.txt        # Python dependency manifest
-├── policies.json           # Default policy configuration file
-├── postman_collection.json # Ready-to-import Postman testing collection
-├── README.md               # Documentation and local setup instructions
-│
-└── tests/
-    ├── conftest.py         # Pytest fixtures and test application setup
-    ├── test_limiter.py     # Unit tests for Fixed and Sliding window algorithms
-    ├── test_policy.py      # Unit tests for Policy models, validation, and rules
-    ├── test_identity.py    # Unit tests for client identification and key masking
-    ├── test_blocking.py    # Unit tests for abuse prevention and block durations
-    └── test_api_integration.py # End-to-end integration tests for Flask API
+├── app.py                     # Flask application factory and server entrypoint
+├── config.py                  # Environment config and automatic .env parser
+├── routes.py                  # API endpoints, middleware, and Prometheus metrics
+├── limiter.py                 # Fixed Window, Sliding Window, and Token Bucket engines
+├── policy.py                  # RateLimitRule models and PolicyManager CRUD
+├── identity.py                # Client identification, key masking, and tiering
+├── metrics.py                 # Prometheus exposition metrics collector
+├── blocking.py                # Abuse detection and tiered penalty blocking
+├── logging_utils.py           # Request decision audit logging
+├── ai_service.py              # DeepSeek AI gateway and copilot integration
+├── policies.json              # Default policy catalog
+├── postman_collection.json    # Complete Postman testing suite (16 requests)
+├── Dockerfile                 # Multi-stage production container
+├── docker-compose.yml         # API Shield + Redis cluster orchestrator
+├── .dockerignore              # Clean container build rules
+├── .github/workflows/ci.yml   # Multi-version Pytest matrix CI workflow
+└── tests/                     # 46 Automated Unit & Integration Tests
 ```
 
 ---
 
 ## 🚀 Quick Start Guide
 
-### 1. Prerequisites
-- Python 3.10+ (Python 3.11 recommended)
-- Optional: Redis Server running on `localhost:6379`. If Redis is not running, API Shield automatically falls back to an in-memory `FakeRedis` backend so the application and tests run immediately without extra setup.
+### Option A: Run with Docker Compose (Recommended)
 
-### 2. Activate the Virtual Environment
-Always activate the project virtual environment before running commands:
+Start API Shield and Redis together with a single command:
 
-**On Windows (PowerShell):**
-```powershell
-# Navigate to the project directory
-cd C:\Users\user\.gemini\antigravity-ide\scratch\api_shield
-
-# Activate virtual environment
-.\venv\Scripts\Activate.ps1
-```
-
-**On Windows (Command Prompt):**
-```cmd
-venv\Scripts\activate.bat
-```
-
-**On Linux / macOS:**
 ```bash
-source venv/bin/activate
-```
+# 1. Clone repository
+git clone https://github.com/Yuvaraj-sudo-max/API-SHIELD.git
+cd API-SHIELD
 
-*(If you ever need to recreate the virtual environment from scratch:)*
-```bash
-python -m venv venv
-.\venv\Scripts\pip install -r requirements.txt
-```
+# 2. Configure environment
+cp .env.example .env
+# Edit .env with your DEEPSEEK_API_KEY and API_KEY
 
-### 3. Run the Application
-Start the Flask development server using the virtual environment's Python:
-
-```powershell
-.\venv\Scripts\python app.py
+# 3. Spin up cluster
+docker-compose up --build -d
 ```
-Or with the virtual environment activated:
-```bash
-python app.py
-```
-
-The application will start on `http://127.0.0.1:5000`.
+Access the dashboard at **`http://localhost:5000`** and metrics at **`http://localhost:5000/metrics`**.
 
 ---
 
-## 🧪 Running Automated Tests
+### Option B: Local Python Environment
 
-Run the complete test suite with **pytest**:
-
+**Windows (PowerShell):**
 ```powershell
-.\venv\Scripts\pytest -v
+# 1. Navigate to directory
+cd C:\Users\user\.gemini\antigravity-ide\scratch\api_shield
+
+# 2. Activate Virtual Environment
+.\venv\Scripts\Activate.ps1
+
+# 3. Install Dependencies
+pip install -r requirements.txt
+
+# 4. Run Application
+python app.py
 ```
 
-All 31 unit and integration test cases will execute against the in-memory test Redis fixture:
-- Rate limiter tests (Fixed Window, Sliding Window, boundary crossing, counter isolation)
-- Policy validation & lifecycle tests (CRUD, active/inactive states)
-- Client identity & API key masking tests
-- Abuse prevention & temporary blocking tiers
-- End-to-end API integration tests
+**Linux / macOS:**
+```bash
+source venv/bin/activate
+pip install -r requirements.txt
+python app.py
+```
+
+The application will start on **`http://127.0.0.1:5000`**.
+
+---
+
+## 🧪 Running Automated Tests (46 Tests)
+
+Run the full automated test suite with **pytest**:
+
+```powershell
+pytest -v
+```
+
+All 46 unit and integration test cases will execute:
+- DeepSeek AI completions, masked key privacy, and prompt rate limiting.
+- Sliding Window, Fixed Window, and Token Bucket burst calculations.
+- Multi-tenant client tiering and multiplier scaling (`Free`, `Pro`, `Enterprise`).
+- Progressive penalty blocking and automated cooldowns.
+- Prometheus `/metrics` exposition format.
+
+---
+
+## 📊 Rate Limiting Algorithm Comparison
+
+| Feature | Fixed Window | Sliding Window | Token Bucket |
+| :--- | :--- | :--- | :--- |
+| **Engine** | Redis Atomic Counter (`INCR`) | Redis Sorted Set (`ZSET`) | Redis Hash (`tokens`, `timestamp`) |
+| **Boundary Burst Protection** | ❌ May burst 2x at boundary | ✅ 100% Guaranteed | ✅ Controlled burst up to capacity |
+| **Memory Efficiency** | 🟢 Minimal (1 key per window) | 🟡 O(N) entries per window | 🟢 Minimal (1 hash per client) |
+| **Best Used For** | Standard REST APIs | Sensitive Auth/Payments | Streaming / LLM Gateways |
 
 ---
 
 ## ⚙️ Core Concepts & Business Rules
 
-### 1. Client Identification (SRS Section 3.1)
-1. Checks the `X-API-Key` HTTP header. If present and non-empty, client is identified as `key:<api_key>`.
+### 1. Client Identification & Multi-Tenant Tiers (SRS Section 3.1)
+1. Checks the `X-API-Key` HTTP header. If present, client is identified as `key:<api_key>`.
 2. Otherwise, falls back to the client remote IP address (`ip:<remote_addr>`).
-3. For security and compliance (SRS Section 12), all sensitive API keys are masked before logging (e.g. `key:sec***56`).
+3. Evaluates client tier (`free`, `pro`, `enterprise`) from `X-Client-Tier` or key prefixes (`pro_`, `ent_`).
+4. Sensitive keys are automatically masked before logging (e.g. `key:sk-fc0...b1df`).
 
-### 2. Rate Limiting Algorithms (SRS Section 4)
-- **Fixed Window (`fixed_window`)**: Divides time into fixed epoch buckets (`time // window`). Increments an atomic Redis key `rate:<key>:<window_num>` with a TTL equal to the window length.
-- **Sliding Window (`sliding_window`)**: Tracks request timestamps in a Redis Sorted Set (`slide:<key>`). Prunes entries older than `now - window` using `ZREMRANGEBYSCORE`, records the new timestamp, and verifies the cardinal count using `ZCARD`.
+### 2. Tiered Temporary Blocking (SRS Section 6.1)
+When a client repeatedly exceeds limits, temporary penalty blocks escalate:
+- **1st violation**: 60 seconds
+- **2nd violation**: 300 seconds (5 minutes)
+- **3rd+ violations**: 1800 seconds (30 minutes)
 
-### 3. Tiered Temporary Blocking (SRS Section 6.1)
-When a client exceeds the limit, a violation is recorded (`violation:<client_id>`). Repeated violations trigger temporary blocking:
-- **1–3 violations**: 5 minutes (300 seconds)
-- **4–6 violations**: 15 minutes (900 seconds)
-- **7+ violations**: 30 minutes (1800 seconds)
-
-Subsequent requests from blocked clients immediately return `HTTP 429 Too Many Requests` with a `Retry-After: <ttl>` header.
+Subsequent requests from blocked clients return `HTTP 429 Too Many Requests` with a `Retry-After: <ttl>` header.
 
 ---
 
@@ -125,7 +158,8 @@ Subsequent requests from blocked clients immediately return `HTTP 429 Too Many R
 
 ### Public / Unprotected
 - `GET /health` — Check system status and Redis connectivity.
-- `GET /` — Interactive live test dashboard.
+- `GET /metrics` — Prometheus standard exposition format.
+- `GET /` — 3D interactive command dashboard.
 
 ### Policy Management
 - `GET /api/policies` — List all registered policies.
@@ -134,50 +168,70 @@ Subsequent requests from blocked clients immediately return `HTTP 429 Too Many R
 - `PUT /api/policies/<name>` — Update an existing policy.
 - `POST /api/policies/<name>/activate` — Activate policy.
 - `POST /api/policies/<name>/deactivate` — Deactivate policy.
+- `DELETE /api/policies/<name>` — Delete policy.
 
 ### Protected Endpoints
-- `GET /api/products` — Default: Fixed Window (limit: 5 requests / 60 seconds).
-- `GET /api/users` — Default: Sliding Window (limit: 10 requests / 60 seconds).
-- `POST /api/login` — Default: Fixed Window (limit: 5 requests / 300 seconds).
-- `POST /api/ai/chat` — Default: Sliding Window (limit: 5 requests / 60 seconds). Protected DeepSeek AI Gateway.
+- `GET /api/products` — Fixed Window (5 req / 60s).
+- `GET /api/users` — Sliding Window (10 req / 60s).
+- `GET /api/stream` — Token Bucket (10 burst / 30s).
+- `POST /api/login` — Auth Guard (5 req / 300s).
+- `POST /api/ai/chat` — DeepSeek LLM Gateway (5 req / 60s).
 
-### DeepSeek AI Integration Endpoints
-- `GET /api/ai/status` — Checks DeepSeek API key connection, model, and account balance.
-- `POST /api/ai/chat` — Rate-limited AI completion endpoint. Demonstrates API Shield protecting upstream LLM tokens against quota depletion.
-- `POST /api/ai/analyze-threat` — Autonomous threat audit over recent traffic logs using DeepSeek intelligence.
+### DeepSeek AI Security Endpoints
+- `GET /api/ai/status` — Checks DeepSeek connection and masked key status.
+- `POST /api/ai/chat` — Rate-limited AI completion endpoint.
+- `POST /api/ai/analyze-threat` — Autonomous threat audit over recent traffic logs.
 - `POST /api/ai/generate-policy` — Natural language policy generator powered by DeepSeek.
 
-### Sample Request Headers
-```http
-POST /api/ai/chat HTTP/1.1
-Host: 127.0.0.1:5000
-Content-Type: application/json
+---
 
+## 📈 Prometheus Telemetry
 
-{
-  "prompt": "Explain how rate limiting protects AI LLM endpoints."
-}
+Scrape gateway metrics via standard Prometheus format at `GET /metrics`:
+
 ```
+# HELP api_shield_requests_total Total number of HTTP requests processed
+# TYPE api_shield_requests_total counter
+api_shield_requests_total{endpoint="/api/ai/chat",status="200",tier="pro"} 14
+api_shield_requests_total{endpoint="/api/stream",status="429",tier="free"} 2
 
-### Sample Response Headers
-```http
-HTTP/1.1 200 OK
-X-RateLimit-Limit: 5
-X-RateLimit-Remaining: 4
-Content-Type: application/json
+# HELP api_shield_rate_limit_blocks_total Total rate limit rejections (HTTP 429)
+# TYPE api_shield_rate_limit_blocks_total counter
+api_shield_rate_limit_blocks_total{endpoint="/api/stream",algorithm="token_bucket"} 2
+
+# HELP api_shield_policies_active Active rate limit policies
+# TYPE api_shield_policies_active gauge
+api_shield_policies_active 5
 ```
 
 ---
 
+## 📜 Standard Response Headers
+
+Every request processed by API Shield includes RFC-compliant rate limit telemetry:
+
+| Header | Description |
+| :--- | :--- |
+| `X-RateLimit-Limit` | Effective request limit for the active window and client tier |
+| `X-RateLimit-Remaining` | Remaining request quota in the active window |
+| `X-Client-Tier` | Resolved client service tier (`free`, `pro`, `enterprise`) |
+| `Retry-After` | Seconds until quota replenishes or penalty block expires (on HTTP 429) |
 
 ---
 
-## 📬 Postman Testing
+## 📬 Postman Testing Suite (16 Requests)
 
 A pre-configured Postman collection is included in the project root:
-- File: [postman_collection.json](file:///C:/Users/user/.gemini/antigravity-ide/scratch/api_shield/postman_collection.json)
+- File: `postman_collection.json`
 
 To use:
 1. Open Postman.
 2. Click **Import** and select `postman_collection.json`.
-3. The collection includes pre-built requests for all protected routes (including DeepSeek AI Gateway and Threat Analysis), with pre-configured variables for `base_url` (`http://127.0.0.1:5000`) and `api_key` (`sk-fc02e982d5934be9a510598120f2b1df`).
+3. Pre-configured variables: `base_url` (`http://127.0.0.1:5000`), `api_key` (`sk-fc02e982d5934be9a510598120f2b1df`).
+
+---
+
+## 👤 Author & License
+
+Created by **[Yuvaraj s (Yuvaraj-sudo-max)](https://github.com/Yuvaraj-sudo-max)**.  
+Released under the **MIT License**.

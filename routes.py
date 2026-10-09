@@ -3,12 +3,13 @@ routes.py - API route definitions and rate-limiting middleware for API Shield.
 Implements SRS Section 7.1, 8.1, 8.2, 8.3, 10.1, 13, and 23.
 """
 
-from flask import Blueprint, request, jsonify, g, render_template
-from identity import get_client_id
-from policy import PolicyManager
+from flask import Blueprint, request, jsonify, g, render_template, Response
+from identity import get_client_id, get_client_tier, get_tier_multiplier
+from policy import PolicyManager, RateLimitRule
 from limiter import RateLimiter
 from blocking import BlockManager
 from logging_utils import RequestLogger
+from metrics import global_metrics
 
 api_bp = Blueprint("api", __name__)
 
@@ -22,13 +23,15 @@ def create_rate_limiter_middleware(
 ):
     """
     Registers Flask before_request and after_request hooks implementing
-    the exact Request Decision Logic flow from SRS Section 5.1 and Section 23.
+    the exact Request Decision Logic flow from SRS Section 5.1 and Section 23
+    with multi-tenant client tiering and Prometheus metrics.
     """
 
     @app.before_request
     def check_rate_limits():
         endpoint = request.path
         client_id = get_client_id(request)
+        tier = get_client_tier(request)
 
         # 1. Find active policy for the endpoint (BR-01, BR-02)
         policy = policy_manager.get_policy_for_endpoint(endpoint)
@@ -36,9 +39,26 @@ def create_rate_limiter_middleware(
             # If no active policy exists, allow request without limiting
             return None
 
+        # Multi-Tenant Client Tier Scaling
+        multiplier = get_tier_multiplier(tier)
+        effective_limit = max(1, int(policy.limit * multiplier))
+        if multiplier != 1.0:
+            effective_policy = RateLimitRule(
+                name=policy.name,
+                endpoint=policy.endpoint,
+                limit=effective_limit,
+                window=policy.window,
+                algorithm=policy.algorithm,
+                active=policy.active,
+            )
+        else:
+            effective_policy = policy
+
         # 2. Check if client is temporarily blocked (SRS Section 6.2 & 23)
         blocked, block_ttl = block_manager.is_blocked(client_id)
         if blocked:
+            global_metrics.record_block(endpoint, policy.algorithm)
+            global_metrics.record_request(endpoint, 429, tier)
             request_logger.log_blocked(
                 client_id=client_id,
                 endpoint=endpoint,
@@ -51,15 +71,19 @@ def create_rate_limiter_middleware(
                 "details": f"Client temporarily blocked for repeated violations. Retry in {block_ttl}s."
             })
             response.status_code = 429
-            response.headers["X-RateLimit-Limit"] = str(policy.limit)
+            response.headers["X-RateLimit-Limit"] = str(effective_policy.limit)
             response.headers["X-RateLimit-Remaining"] = "0"
             response.headers["Retry-After"] = str(block_ttl)
+            response.headers["X-Client-Tier"] = tier
             return response
 
-        # 3. Evaluate rate limit algorithm (Fixed Window or Sliding Window)
-        res = rate_limiter.is_allowed(client_id, endpoint, policy)
+        # 3. Evaluate rate limit algorithm (Fixed Window, Sliding Window, or Token Bucket)
+        res = rate_limiter.is_allowed(client_id, endpoint, effective_policy)
 
         if not res.allowed:
+            global_metrics.record_block(endpoint, policy.algorithm)
+            global_metrics.record_request(endpoint, 429, tier)
+
             # 4. Record violation and trigger temporary blocking if necessary
             violation_count, block_duration = block_manager.record_violation(client_id)
             retry_after = res.retry_after or block_duration
@@ -67,7 +91,7 @@ def create_rate_limiter_middleware(
             request_logger.log_blocked(
                 client_id=client_id,
                 endpoint=endpoint,
-                reason=f"Limit exceeded ({res.count}/{policy.limit} in {policy.window}s)",
+                reason=f"Limit exceeded ({res.count}/{effective_policy.limit} in {effective_policy.window}s)",
                 retry_after=retry_after,
             )
 
@@ -76,26 +100,32 @@ def create_rate_limiter_middleware(
                 "message": "Please try again later"
             })
             response.status_code = 429
-            response.headers["X-RateLimit-Limit"] = str(policy.limit)
+            response.headers["X-RateLimit-Limit"] = str(effective_policy.limit)
             response.headers["X-RateLimit-Remaining"] = "0"
             response.headers["Retry-After"] = str(retry_after)
+            response.headers["X-Client-Tier"] = tier
             return response
 
         # 5. Request allowed: pass metadata to after_request to inject headers
         g.rate_limit_info = {
-            "limit": policy.limit,
+            "limit": effective_policy.limit,
             "remaining": res.remaining,
             "client_id": client_id,
             "endpoint": endpoint,
+            "tier": tier,
         }
         request_logger.log_allowed(client_id, endpoint, res.remaining)
         return None
 
     @app.after_request
     def inject_rate_limit_headers(response):
+        tier = "free"
         if hasattr(g, "rate_limit_info"):
             response.headers["X-RateLimit-Limit"] = str(g.rate_limit_info["limit"])
             response.headers["X-RateLimit-Remaining"] = str(g.rate_limit_info["remaining"])
+            tier = g.rate_limit_info.get("tier", "free")
+            response.headers["X-Client-Tier"] = tier
+        global_metrics.record_request(request.path, response.status_code, tier)
         return response
 
 
@@ -112,7 +142,7 @@ def register_routes(
         ai_service = AIService()
 
     # ------------------------------------------------------------------
-    # Unprotected Health Check (SRS Section 8.1 & FR-14)
+    # Unprotected Health Check & Prometheus Metrics (SRS Section 8.1)
     # ------------------------------------------------------------------
     @app.route("/health", methods=["GET"])
     def health_check():
@@ -123,6 +153,13 @@ def register_routes(
             "redis": "connected" if redis_alive else "disconnected",
             "backend": getattr(redis_store, "backend", "unknown"),
         }), 200
+
+    @app.route("/metrics", methods=["GET"])
+    def prometheus_metrics():
+        """Exports Prometheus standard exposition metrics (version 0.0.4)."""
+        text = global_metrics.export_prometheus(policy_manager=policy_manager)
+        return Response(text, mimetype="text/plain; version=0.0.4")
+
 
     # ------------------------------------------------------------------
     # Policy Management Endpoints (SRS Section 7.1 & FR-11, FR-12)
@@ -272,6 +309,19 @@ def register_routes(
             ]
         }), 200
 
+    @app.route("/api/stream", methods=["GET"])
+    def get_stream():
+        """Demonstration endpoint protected by Token Bucket algorithm."""
+        return jsonify({
+            "message": "Real-time telemetry event stream active",
+            "algorithm": "token_bucket",
+            "stream_id": "strm_live_quantum_channel",
+            "events": [
+                {"event": "GATEWAY_PULSE", "severity": "LOW"},
+                {"event": "SHIELD_SYNCHRONIZED", "severity": "INFO"},
+            ]
+        }), 200
+
     @app.route("/api/login", methods=["POST"])
     def login():
         data = request.get_json(silent=True) or {}
@@ -340,6 +390,11 @@ def register_routes(
             prompt=str(prompt),
             system_prompt=system_prompt,
             max_tokens=max_tokens,
+        )
+
+        global_metrics.record_ai(
+            model=result.get("model", "deepseek-flash"),
+            status="success" if result.get("success") else "error"
         )
 
         return jsonify({

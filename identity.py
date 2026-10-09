@@ -37,3 +37,39 @@ def mask_client_id(client_id: str) -> str:
         return f"key:{prefix}***{suffix}"
 
     return client_id
+
+
+def get_client_tier(request) -> str:
+    """
+    Resolves client tier: 'free', 'pro', or 'enterprise'.
+    1. Checks X-Client-Tier header if provided.
+    2. Infers from API key prefix ('ent_', 'pro_').
+    3. Defaults to 'free'.
+    """
+    header_tier = request.headers.get("X-Client-Tier", "").strip().lower()
+    if header_tier in ("free", "pro", "enterprise"):
+        return header_tier
+
+    api_key = request.headers.get("X-API-Key", "").strip()
+    if api_key.startswith("ent_") or api_key.startswith("enterprise_"):
+        return "enterprise"
+    elif api_key.startswith("pro_"):
+        return "pro"
+
+    return "free"
+
+
+def get_tier_multiplier(tier: str) -> float:
+    """
+    Returns rate limit quota multiplier for a given client tier.
+    - Free: 1.0x (standard policy limit)
+    - Pro: 3.0x quota
+    - Enterprise: 10.0x quota
+    """
+    multipliers = {
+        "free": 1.0,
+        "pro": 3.0,
+        "enterprise": 10.0,
+    }
+    return multipliers.get((tier or "free").lower(), 1.0)
+

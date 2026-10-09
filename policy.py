@@ -37,7 +37,7 @@ class RateLimitRule:
         - endpoint must start with '/'.
         - limit must be greater than 0 (BR-03).
         - window must be greater than 0 (BR-04).
-        - algorithm must be 'fixed_window' or 'sliding_window'.
+        - algorithm must be 'fixed_window', 'sliding_window', or 'token_bucket'.
         """
         if not self.name:
             raise ValueError("Policy name must be a non-empty string.")
@@ -51,8 +51,8 @@ class RateLimitRule:
         if self.window <= 0:
             raise ValueError("Window must be greater than 0.")
 
-        if self.algorithm not in ("fixed_window", "sliding_window"):
-            raise ValueError("Algorithm must be 'fixed_window' or 'sliding_window'.")
+        if self.algorithm not in ("fixed_window", "sliding_window", "token_bucket"):
+            raise ValueError("Algorithm must be 'fixed_window', 'sliding_window', or 'token_bucket'.")
 
     def get_key(self, client_id: str) -> str:
         """

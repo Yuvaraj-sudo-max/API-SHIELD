@@ -128,6 +128,14 @@
             <span class="btn-text" id="sound-state-text">SFX: OFF</span>
           </button>
 
+          <a href="/metrics" target="_blank" class="btn-hud-secondary" id="btn-nav-metrics"
+            title="View Real-Time Prometheus Metrics Stream" style="text-decoration: none;">
+            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 20V10M12 20V4M6 20v-6"></path>
+            </svg>
+            <span>Prometheus Metrics</span>
+          </a>
+
           <button class="btn-hud-secondary" id="btn-reset-counters"
             title="Flush Redis Rate-Limiting Counters for testing">
             <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -354,6 +362,10 @@
                       data-algo="sliding_window">
                       /api/ai/chat — DeepSeek LLM Gateway (5 req / 60s)
                     </option>
+                    <option value="/api/stream" data-method="GET" data-limit="10" data-window="30"
+                      data-algo="token_bucket">
+                      /api/stream — Token Bucket (10 burst / 30s)
+                    </option>
                   </select>
                 </div>
               </div>
@@ -372,7 +384,7 @@
                   title="Generate New Cryptographic Key">
                   <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path
-                      d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z">
+                      d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z">
                     </path>
                     <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
                     <line x1="12" y1="22.08" x2="12" y2="12"></line>
@@ -397,6 +409,21 @@
                   data-name="Attacker 99">
                   <span class="chip-avatar threat">!</span> Attacker 99
                 </button>
+              </div>
+            </div>
+
+            <!-- Client Tier Selection (Multi-Tenant Enforcer) -->
+            <div class="form-field" style="margin-top: 0.25rem;">
+              <div class="label-row-flex">
+                <label class="hud-label" for="client-tier-select">CLIENT TIER (MULTI-TENANT QUOTA SCALING)</label>
+                <span class="masked-preview text-emerald" id="tier-multiplier-preview">1.0x BASE QUOTA</span>
+              </div>
+              <div class="custom-select-wrapper">
+                <select class="hud-select font-mono" id="client-tier-select">
+                  <option value="free" selected>Free Tier (1.0x Base Quota)</option>
+                  <option value="pro">Pro Tier (3.0x Quota Multiplier)</option>
+                  <option value="enterprise">Enterprise Tier (10.0x Quota Multiplier)</option>
+                </select>
               </div>
             </div>
 
@@ -832,6 +859,7 @@
           <label class="hud-label" for="select-policy-algo">ALGORITHM ENGINE</label>
           <select class="hud-select" id="select-policy-algo">
             <option value="sliding_window">Sliding Window (Precision Log / ZSET - SRS 4.2)</option>
+            <option value="token_bucket">Token Bucket (Continuous Token Refill & Burst - Industry Standard)</option>
             <option value="fixed_window">Fixed Window (Atomic Counter / Key Expiry - SRS 4.1)</option>
           </select>
         </div>

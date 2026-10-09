@@ -30,5 +30,13 @@
     "window": 60,
     "algorithm": "sliding_window",
     "active": true
+  },
+  {
+    "name": "stream_bucket_limit",
+    "endpoint": "/api/stream",
+    "limit": 10,
+    "window": 30,
+    "algorithm": "token_bucket",
+    "active": true
   }
 ]

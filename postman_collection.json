@@ -262,6 +262,41 @@
         },
         "description": "Performs DeepSeek security audit over recent traffic logs."
       }
+    },
+    {
+      "name": "15. Token Bucket Stream (GET /api/stream)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-API-Key",
+            "value": "{{api_key}}"
+          },
+          {
+            "key": "X-Client-Tier",
+            "value": "pro"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/stream",
+          "host": ["{{base_url}}"],
+          "path": ["api", "stream"]
+        },
+        "description": "Continuous Token Bucket algorithm test endpoint with client tier scaling."
+      }
+    },
+    {
+      "name": "16. Prometheus Metrics (GET /metrics)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/metrics",
+          "host": ["{{base_url}}"],
+          "path": ["metrics"]
+        },
+        "description": "Standard Prometheus text format metrics exposition."
+      }
     }
   ]
 }
