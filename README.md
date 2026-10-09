@@ -152,7 +152,7 @@ Subsequent requests from blocked clients immediately return `HTTP 429 Too Many R
 POST /api/ai/chat HTTP/1.1
 Host: 127.0.0.1:5000
 Content-Type: application/json
-X-API-Key: sk-fc02e982d5934be9a510598120f2b1df
+
 
 {
   "prompt": "Explain how rate limiting protects AI LLM endpoints."
@@ -169,19 +169,6 @@ Content-Type: application/json
 
 ---
 
-## 🔑 Environment Variables (.env)
-
-The project includes automated `.env` file loading (`python-dotenv` with fallback):
-
-| Variable | Description | Default |
-|---|---|---|
-| `API_KEY` | Primary API Key for testing client requests | `sk-fc02e982d5934be9a510598120f2b1df` |
-| `DEEPSEEK_API_KEY` | DeepSeek LLM API Key | `sk-fc02e982d5934be9a510598120f2b1df` |
-| `DEEPSEEK_BASE_URL` | DeepSeek API Base URL | `https://api.deepseek.com` |
-| `DEEPSEEK_MODEL` | Default model for completions | `deepseek-flash` |
-| `APP_PORT` | Flask Gateway server port | `5000` |
-| `REDIS_HOST` | Redis Host | `localhost` |
-| `REDIS_PORT` | Redis Port | `6379` |
 
 ---
 
