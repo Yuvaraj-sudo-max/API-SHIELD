@@ -522,9 +522,10 @@ document.addEventListener('DOMContentLoaded', () => {
       updateResponseCard(res.status, limitHeader, remainingHeader, retryAfterHeader, rttMs, data, decisionType);
       updateQuotaGauge(limitHeader, remainingHeader);
 
-      // Refresh Stats & Audit Logs
+      // Refresh Stats, Audit Logs & Redis Storage Telemetry
       fetchStats();
       fetchLogs();
+      fetchRedisTelemetry();
     } catch (err) {
       console.error('Request dispatch failed:', err);
       setPipelineStage(5, 'ERROR', err.message, true);
@@ -1079,6 +1080,266 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // -------------------------------------------------------------
+  // 14c. REDIS DATA STORE & CLIENT TELEMETRY CONTROLLER
+  // -------------------------------------------------------------
+  let redisTelemetryState = {
+    requests: [],
+    keys: [],
+    serverInfo: {},
+    currentFilter: 'ALL',
+    searchIp: '',
+  };
+
+  const rmTotalReqs = document.getElementById('rm-total-reqs');
+  const rmUnknownUsers = document.getElementById('rm-unknown-users');
+  const rmUsedMemory = document.getElementById('rm-used-memory');
+  const rmActiveKeys = document.getElementById('rm-active-keys');
+  const rmLatency = document.getElementById('rm-latency');
+  const rmStatus = document.getElementById('rm-status');
+  const redisTelemetryBody = document.getElementById('redis-telemetry-body');
+  const redisKeysBody = document.getElementById('redis-keys-body');
+  const btnProbeRedisLatency = document.getElementById('btn-probe-redis-latency');
+  const btnRefreshRedisTelemetry = document.getElementById('btn-refresh-redis-telemetry');
+  const btnFlushRedisRateKeys = document.getElementById('btn-flush-redis-rate-keys');
+  const inputSearchRedisIp = document.getElementById('input-search-redis-ip');
+  const redisFilterChips = document.querySelectorAll('[data-redis-filter]');
+
+  async function fetchRedisTelemetry() {
+    try {
+      const res = await fetch('/api/redis/telemetry');
+      if (!res.ok) return;
+      const data = await res.json();
+      redisTelemetryState.requests = data.requests || [];
+      redisTelemetryState.keys = data.keys || [];
+      redisTelemetryState.serverInfo = data.server_info || {};
+
+      if (rmTotalReqs) rmTotalReqs.textContent = data.total_requests || 0;
+      if (rmUnknownUsers) rmUnknownUsers.textContent = data.unknown_users_count || 0;
+      if (rmUsedMemory) rmUsedMemory.textContent = data.server_info?.used_memory_human || '--';
+      if (rmActiveKeys) rmActiveKeys.textContent = data.total_keys || 0;
+      if (rmLatency && data.server_info?.latency_ms !== undefined) {
+        rmLatency.textContent = `${data.server_info.latency_ms} ms`;
+      }
+      if (rmStatus) {
+        rmStatus.textContent = data.server_info?.connected ? 'ONLINE' : 'OFFLINE';
+        rmStatus.className = `rm-value font-mono ${data.server_info?.connected ? 'text-emerald' : 'text-crimson'}`;
+      }
+
+      renderRedisTelemetry();
+      renderRedisKeys();
+    } catch (err) {
+      console.warn('Failed to sync Redis telemetry:', err);
+    }
+  }
+
+  function renderRedisTelemetry() {
+    if (!redisTelemetryBody) return;
+    const filter = redisTelemetryState.currentFilter;
+    const search = (redisTelemetryState.searchIp || '').toLowerCase().trim();
+
+    let items = redisTelemetryState.requests.filter((r) => {
+      if (filter === 'UNKNOWN' && !r.is_unknown_user) return false;
+      if (filter === 'IDENTIFIED' && r.is_unknown_user) return false;
+      if (filter === 'BLOCKED' && r.status !== 'BLOCKED') return false;
+      if (search && !String(r.sender_ip || '').toLowerCase().includes(search) && !String(r.client_id || '').toLowerCase().includes(search)) {
+        return false;
+      }
+      return true;
+    });
+
+    if (items.length === 0) {
+      redisTelemetryBody.innerHTML = `
+        <tr>
+          <td colspan="13" class="empty-row">
+            No client request telemetry matching "${filter}". Trigger test traffic from Mission Control above to view live Redis data.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    redisTelemetryBody.innerHTML = '';
+    items.forEach((item) => {
+      const tr = document.createElement('tr');
+      const isUnknown = item.is_unknown_user;
+      const statusClass = item.status === 'ALLOWED' ? 'allowed' : item.status === 'LIMITED' ? 'limited' : 'blocked';
+      const tierClass = (item.tier || 'free').toLowerCase();
+
+      tr.innerHTML = `
+        <td>${escapeHtml(item.timestamp || '--')}</td>
+        <td>
+          <div style="display:flex; flex-direction:column; gap:2px;">
+            <span class="font-mono text-cyan" style="font-weight:700;">${escapeHtml(item.sender_ip || '--')}</span>
+            <span class="badge-user-type ${isUnknown ? 'unknown' : 'identified'}">
+              ${isUnknown ? 'UNKNOWN USER' : 'IDENTIFIED'}
+            </span>
+          </div>
+        </td>
+        <td><span class="font-mono text-muted">${escapeHtml(item.receiver_ip || '127.0.0.1:5000')}</span></td>
+        <td><span class="font-mono">${escapeHtml(item.client_id || '--')}</span></td>
+        <td><span class="badge-tier ${tierClass}">${escapeHtml((item.tier || 'free').toUpperCase())}</span></td>
+        <td><span class="font-mono">${escapeHtml(item.endpoint || '--')}</span></td>
+        <td><span class="font-mono" style="font-size:0.75rem; color:#c084fc;">${escapeHtml(item.redis_key || '--')}</span></td>
+        <td><span class="badge-key-type">${escapeHtml((item.redis_type || 'string').toUpperCase())}</span></td>
+        <td><span class="font-mono" style="font-weight:700;">${item.remaining !== undefined ? item.remaining : '--'} / ${item.limit || '--'}</span></td>
+        <td><span class="font-mono text-emerald">${item.ttl !== undefined ? item.ttl + 's' : '--'}</span></td>
+        <td>
+          <span class="font-mono" style="color:${item.violations > 0 ? 'var(--neon-crimson)' : 'var(--text-muted)'}">
+            ${item.violations || 0} violation(s)
+          </span>
+        </td>
+        <td>
+          <span class="audit-status-badge ${statusClass}">
+            ${escapeHtml(item.status || 'ALLOWED')}
+          </span>
+        </td>
+        <td>
+          <div style="display:flex; gap:4px;">
+            <button type="button" class="btn-hud-ghost mini" onclick="window.unblockClientDirect('${escapeHtml(item.client_id)}')">Unblock</button>
+          </div>
+        </td>
+      `;
+      redisTelemetryBody.appendChild(tr);
+    });
+  }
+
+  function renderRedisKeys() {
+    if (!redisKeysBody) return;
+    const keys = redisTelemetryState.keys || [];
+    if (keys.length === 0) {
+      redisKeysBody.innerHTML = `
+        <tr>
+          <td colspan="6" class="empty-row">
+            No active rate limit keys in Redis DB 0. Dispatch requests above to write keys to Redis.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    redisKeysBody.innerHTML = '';
+    keys.forEach((k) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><span class="font-mono text-cyan" style="font-weight:700;">${escapeHtml(k.key)}</span></td>
+        <td><span class="badge-key-type" style="background:rgba(56,189,248,0.15); color:#38bdf8;">${escapeHtml((k.category || '').toUpperCase())}</span></td>
+        <td><span class="badge-key-type">${escapeHtml((k.type || '').toUpperCase())}</span></td>
+        <td><span class="font-mono text-emerald">${k.ttl > 0 ? k.ttl + 's' : (k.ttl === -1 ? 'NO EXPIRY' : 'EXPIRED')}</span></td>
+        <td><span class="font-mono text-muted" style="font-size:0.75rem;">${escapeHtml(k.value_preview || '--')}</span></td>
+        <td>
+          <button type="button" class="btn-hud-ghost mini text-crimson" onclick="window.deleteRedisKeyDirect('${escapeHtml(k.key)}')">Purge</button>
+        </td>
+      `;
+      redisKeysBody.appendChild(tr);
+    });
+  }
+
+  window.unblockClientDirect = async function(clientId) {
+    if (!clientId) return;
+    try {
+      const res = await fetch('/api/unblock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_id: clientId }),
+      });
+      alert(`Client ${clientId} unblocked. Key and violation counters cleared in Redis.`);
+      fetchRedisTelemetry();
+      fetchLogs();
+      fetchStats();
+    } catch (e) {
+      alert('Error unblocking client: ' + e.message);
+    }
+  };
+
+  window.deleteRedisKeyDirect = async function(keyName) {
+    if (!keyName) return;
+    try {
+      const res = await fetch('/api/redis/delete-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: keyName }),
+      });
+      fetchRedisTelemetry();
+    } catch (e) {
+      alert('Error deleting key: ' + e.message);
+    }
+  };
+
+  if (btnProbeRedisLatency) {
+    btnProbeRedisLatency.addEventListener('click', async () => {
+      btnProbeRedisLatency.classList.add('loading');
+      try {
+        const res = await fetch('/api/redis/test', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          alert(`Redis Probe Verified:\nHost: ${data.host}:${data.port}\nLatency: ${data.latency_ms} ms\nBackend: ${data.backend.toUpperCase()} [Verified OK]`);
+        } else {
+          alert(`Redis Probe Error: ${data.error || 'Check server connection'}`);
+        }
+        fetchRedisTelemetry();
+      } catch (e) {
+        alert('Latency probe failed: ' + e.message);
+      } finally {
+        btnProbeRedisLatency.classList.remove('loading');
+      }
+    });
+  }
+
+  if (btnRefreshRedisTelemetry) {
+    btnRefreshRedisTelemetry.addEventListener('click', () => {
+      fetchRedisTelemetry();
+    });
+  }
+
+  if (btnFlushRedisRateKeys) {
+    btnFlushRedisRateKeys.addEventListener('click', async () => {
+      if (!confirm('Are you sure you want to flush all API Shield rate limit keys from Redis DB?')) return;
+      try {
+        const res = await fetch('/api/redis/clear', { method: 'POST' });
+        const data = await res.json();
+        alert(data.message || 'Rate limit keys flushed.');
+        fetchRedisTelemetry();
+        fetchStats();
+      } catch (e) {
+        alert('Error flushing keys: ' + e.message);
+      }
+    });
+  }
+
+  if (inputSearchRedisIp) {
+    inputSearchRedisIp.addEventListener('input', () => {
+      redisTelemetryState.searchIp = inputSearchRedisIp.value;
+      renderRedisTelemetry();
+    });
+  }
+
+  redisFilterChips.forEach((chip) => {
+    chip.addEventListener('click', () => {
+      redisFilterChips.forEach((c) => c.classList.remove('active'));
+      chip.classList.add('active');
+      redisTelemetryState.currentFilter = chip.dataset.redisFilter;
+      renderRedisTelemetry();
+    });
+  });
+
+  // Nav Tab Pill Active State Switching
+  const navTabPills = document.querySelectorAll('.nav-tab-pill');
+  navTabPills.forEach((pill) => {
+    pill.addEventListener('click', (e) => {
+      navTabPills.forEach((p) => p.classList.remove('active'));
+      pill.classList.add('active');
+      const targetId = pill.getAttribute('href');
+      if (targetId && targetId.startsWith('#')) {
+        const targetEl = document.querySelector(targetId);
+        if (targetEl) {
+          e.preventDefault();
+          targetEl.scrollIntoView({ behavior: 'smooth' });
+        }
+      }
+    });
+  });
+
   function escapeHtml(str) {
     if (!str) return '';
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -1122,5 +1383,8 @@ document.addEventListener('DOMContentLoaded', () => {
   fetchPolicies();
   fetchLogs();
   fetchStats();
+  fetchRedisTelemetry();
   setInterval(fetchStats, 5000);
+  setInterval(fetchRedisTelemetry, 4000);
 });
+

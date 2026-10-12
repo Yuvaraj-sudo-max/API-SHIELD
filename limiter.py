@@ -21,6 +21,10 @@ class RateLimitResult(NamedTuple):
     def __bool__(self) -> bool:
         return self.allowed
 
+# Convenient alias for enterprise imports
+LimitResult = RateLimitResult
+
+
 
 def fixed_window_allowed(redis_client: Any, key: str, limit: int, window: int) -> bool:
     """

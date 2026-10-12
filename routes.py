@@ -20,18 +20,30 @@ def create_rate_limiter_middleware(
     rate_limiter: RateLimiter,
     block_manager: BlockManager,
     request_logger: RequestLogger,
+    redis_store=None,
 ):
     """
     Registers Flask before_request and after_request hooks implementing
     the exact Request Decision Logic flow from SRS Section 5.1 and Section 23
-    with multi-tenant client tiering and Prometheus metrics.
+    with multi-tenant client tiering, Prometheus metrics, and live Redis telemetry tracking.
     """
 
     @app.before_request
     def check_rate_limits():
+        import time as _t
         endpoint = request.path
         client_id = get_client_id(request)
         tier = get_client_tier(request)
+
+        # Telemetry Metadata Extraction
+        sender_ip = request.headers.get("X-Forwarded-For", request.remote_addr or "127.0.0.1").split(",")[0].strip()
+        receiver_ip = request.host or "127.0.0.1:5000"
+        has_api_key = bool(request.headers.get("X-API-Key"))
+        user_type = "Identified Client" if has_api_key else "Unknown User (IP Only)"
+        user_agent = request.headers.get("User-Agent", "Unknown-Agent")[:60]
+        time_str = _t.strftime("%H:%M:%S")
+
+        current_store = redis_store or getattr(app, "redis_store", None)
 
         # 1. Find active policy for the endpoint (BR-01, BR-02)
         policy = policy_manager.get_policy_for_endpoint(endpoint)
@@ -54,6 +66,37 @@ def create_rate_limiter_middleware(
         else:
             effective_policy = policy
 
+        key_prefix = "slide" if policy.algorithm == "sliding_window" else "tb" if policy.algorithm == "token_bucket" else "rate"
+        current_redis_key = f"{key_prefix}:{endpoint}:{client_id}"
+        redis_type = "zset" if policy.algorithm == "sliding_window" else "hash" if policy.algorithm == "token_bucket" else "string"
+        ttl_val = getattr(current_store, "ttl", lambda k: policy.window)(current_redis_key) if current_store else policy.window
+        violation_count = getattr(current_store, "get_violation_count", lambda k: 0)(client_id) if current_store else 0
+
+        def log_redis_telemetry(status, status_code, remaining, reason):
+            if current_store and hasattr(current_store, "record_request_telemetry"):
+                current_store.record_request_telemetry({
+                    "timestamp": time_str,
+                    "sender_ip": sender_ip,
+                    "receiver_ip": receiver_ip,
+                    "client_id": client_id,
+                    "is_unknown_user": not has_api_key,
+                    "user_type": user_type,
+                    "tier": tier,
+                    "endpoint": endpoint,
+                    "method": request.method,
+                    "algorithm": policy.algorithm,
+                    "redis_key": current_redis_key,
+                    "redis_type": redis_type,
+                    "ttl": max(0, ttl_val) if ttl_val > 0 else policy.window,
+                    "limit": effective_policy.limit,
+                    "remaining": remaining,
+                    "status": status,
+                    "status_code": status_code,
+                    "violations": violation_count,
+                    "user_agent": user_agent,
+                    "reason": reason,
+                })
+
         # 2. Check if client is temporarily blocked (SRS Section 6.2 & 23)
         blocked, block_ttl = block_manager.is_blocked(client_id)
         if blocked:
@@ -64,6 +107,12 @@ def create_rate_limiter_middleware(
                 endpoint=endpoint,
                 reason="Temporary client block active",
                 retry_after=block_ttl,
+            )
+            log_redis_telemetry(
+                status="BLOCKED",
+                status_code=429,
+                remaining=0,
+                reason=f"Temporary client block active ({block_ttl}s remaining)"
             )
             response = jsonify({
                 "error": "Rate limit exceeded",
@@ -94,6 +143,12 @@ def create_rate_limiter_middleware(
                 reason=f"Limit exceeded ({res.count}/{effective_policy.limit} in {effective_policy.window}s)",
                 retry_after=retry_after,
             )
+            log_redis_telemetry(
+                status="LIMITED",
+                status_code=429,
+                remaining=0,
+                reason=f"Limit exceeded ({res.count}/{effective_policy.limit} in {effective_policy.window}s)"
+            )
 
             response = jsonify({
                 "error": "Rate limit exceeded",
@@ -115,6 +170,12 @@ def create_rate_limiter_middleware(
             "tier": tier,
         }
         request_logger.log_allowed(client_id, endpoint, res.remaining)
+        log_redis_telemetry(
+            status="ALLOWED",
+            status_code=200,
+            remaining=res.remaining,
+            reason="Rate limit quota verified & allowed"
+        )
         return None
 
     @app.after_request
@@ -268,6 +329,7 @@ def register_routes(
         limited = sum(1 for l in logs if l.get("status") == "LIMITED")
         blocked = sum(1 for l in logs if l.get("status") == "BLOCKED")
         ai_info = ai_service.check_status() if ai_service else {}
+        redis_info = redis_store.get_server_info() if hasattr(redis_store, "get_server_info") else {}
         return jsonify({
             "policies_total": len(policies),
             "policies_active": active_count,
@@ -277,12 +339,84 @@ def register_routes(
             "blocked_requests": blocked,
             "backend": getattr(redis_store, "backend", "redis"),
             "health": "healthy" if redis_store.ping() else "degraded",
+            "redis_info": redis_info,
+            "redis_version": redis_info.get("version", "unknown"),
+            "redis_memory": redis_info.get("used_memory_human", "0K"),
+            "redis_latency_ms": redis_info.get("latency_ms", 0.0),
+            "redis_keys_count": redis_info.get("dbsize", 0),
             "ai_status": ai_info.get("status", "not_configured"),
             "ai_connected": ai_info.get("connected", False),
             "ai_provider": ai_info.get("provider", "DeepSeek"),
             "ai_model": ai_info.get("model", "deepseek-flash"),
             "ai_key_masked": ai_info.get("key_masked", "none"),
         }), 200
+
+    # ------------------------------------------------------------------
+    # Live Redis Diagnostics & Real-World Inspection Endpoints
+    # ------------------------------------------------------------------
+    @app.route("/api/redis/info", methods=["GET"])
+    def get_redis_info_endpoint():
+        """Returns live server metrics from Redis (Version, Memory, Uptime, Clients)."""
+        info = redis_store.get_server_info() if hasattr(redis_store, "get_server_info") else {}
+        return jsonify(info), 200
+
+    @app.route("/api/redis/keys", methods=["GET"])
+    def get_redis_keys_endpoint():
+        """Inspects all rate limit and client tracking keys active in Redis."""
+        keys = redis_store.get_rate_limit_keys() if hasattr(redis_store, "get_rate_limit_keys") else []
+        return jsonify({"keys": keys, "total": len(keys)}), 200
+
+    @app.route("/api/redis/clear", methods=["POST"])
+    def clear_redis_keys_endpoint():
+        """Cleanses only API Shield rate limiter keys, preserving foreign DB keys."""
+        deleted = redis_store.clear_rate_limit_keys() if hasattr(redis_store, "clear_rate_limit_keys") else 0
+        return jsonify({
+            "message": f"Flushed {deleted} rate-limiting key(s) from Redis.",
+            "deleted_count": deleted
+        }), 200
+
+    @app.route("/api/redis/test", methods=["POST"])
+    def test_redis_connection_endpoint():
+        """Performs full write/read/delete cycle against Redis and measures roundtrip latency."""
+        res = redis_store.test_read_write_cycle() if hasattr(redis_store, "test_read_write_cycle") else {"success": False}
+        return jsonify(res), 200
+
+    @app.route("/api/redis/telemetry", methods=["GET"])
+    def get_redis_telemetry_endpoint():
+        """
+        Returns full live Redis storage inspection details:
+        - Live Redis server metadata & health
+        - Real-time client request ledger (sender IP, receiver IP, unknown user status, endpoint, quota, Redis key, TTL)
+        - All active rate limiting keys in Redis DB 0
+        """
+        info = redis_store.get_server_info() if hasattr(redis_store, "get_server_info") else {}
+        requests_list = redis_store.get_request_telemetry(limit=100) if hasattr(redis_store, "get_request_telemetry") else []
+        keys = redis_store.get_rate_limit_keys() if hasattr(redis_store, "get_rate_limit_keys") else []
+        unknown_users = sum(1 for r in requests_list if r.get("is_unknown_user"))
+        return jsonify({
+            "server_info": info,
+            "requests": requests_list,
+            "keys": keys,
+            "total_requests": len(requests_list),
+            "unknown_users_count": unknown_users,
+            "total_keys": len(keys),
+        }), 200
+
+    @app.route("/api/redis/delete-key", methods=["POST"])
+    def delete_single_redis_key_endpoint():
+        """Deletes a specific key from Redis storage."""
+        data = request.get_json(silent=True) or {}
+        key = data.get("key")
+        if not key:
+            return jsonify({"error": "Bad request", "message": "Key name is required."}), 400
+        deleted = redis_store.delete(key)
+        return jsonify({
+            "message": f"Key '{key}' deleted from Redis.",
+            "deleted": bool(deleted),
+            "key": key
+        }), 200
+
+
 
     # ------------------------------------------------------------------
     # Protected API Endpoints (SRS Section 8.1 & 8.2)

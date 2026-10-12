@@ -157,9 +157,36 @@
     </header>
 
     <!-- ===================================================================
+         DASHBOARD SECTION NAVIGATION TABS
+         =================================================================== -->
+    <nav class="hud-nav-tabs" aria-label="Command Center Navigation">
+      <a href="#mission-control" class="nav-tab-pill active" id="tab-btn-gateway">
+        <svg class="tab-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+        <span>MISSION CONTROL</span>
+      </a>
+      <a href="#section-redis-storage" class="nav-tab-pill highlight" id="tab-btn-redis">
+        <svg class="tab-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>
+        <span>REDIS STORAGE &amp; UNKNOWN CLIENTS</span>
+        <span class="pill-badge-live">LIVE REDIS 8.2.10</span>
+      </a>
+      <a href="#section-ai-copilot" class="nav-tab-pill" id="tab-btn-ai">
+        <svg class="tab-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4M12 8h.01"/></svg>
+        <span>AI COPILOT</span>
+      </a>
+      <a href="#section-policy-studio" class="nav-tab-pill" id="tab-btn-policies">
+        <svg class="tab-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path></svg>
+        <span>POLICY STUDIO</span>
+      </a>
+      <a href="#section-audit-ledger" class="nav-tab-pill" id="tab-btn-audit">
+        <svg class="tab-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><line x1="16" y1="13" x2="8" y2="13"></line></svg>
+        <span>SECURITY AUDIT</span>
+      </a>
+    </nav>
+
+    <!-- ===================================================================
          MAIN COMMAND GRID: 3D SHIELD MATRIX & MISSION CONTROL DISPATCHER
          =================================================================== -->
-    <main class="grid-primary">
+    <main class="grid-primary" id="mission-control">
       <!-- LEFT COLUMN: 3D HOLOGRAPHIC CORE & LIVE TELEMETRY OSCILLOSCOPE -->
       <section class="col-visuals" aria-label="3D Quantum Defense Core and Oscilloscope">
         <!-- 3D Holographic Viewport Card -->
@@ -693,9 +720,160 @@
     </section>
 
     <!-- ===================================================================
+         REDIS DATA STORE // UNKNOWN USER & CLIENT TELEMETRY TAB
+         =================================================================== -->
+    <section class="hud-panel card-redis-storage" id="section-redis-storage" aria-label="Redis Storage and Client Telemetry Inspector" style="margin-bottom: 2rem;">
+      <div class="panel-header">
+        <div class="panel-title-group">
+          <svg class="panel-icon highlight-cyan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+            <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+            <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+          </svg>
+          <h2 class="panel-title">REDIS DATA STORE // SENDER/RECEIVER &amp; UNKNOWN USER TELEMETRY</h2>
+        </div>
+        <div class="redis-hdr-meta">
+          <span class="redis-engine-pill" id="redis-engine-badge">
+            <span class="status-dot pulsing"></span>
+            REDIS 8.2.10 [LIVE WINDOWS INSTANCE]
+          </span>
+          <button type="button" class="btn-hud-primary mini" id="btn-probe-redis-latency" title="Perform real-time write/read probe">
+            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+            <span>Probe Latency</span>
+          </button>
+          <button type="button" class="btn-hud-secondary mini" id="btn-refresh-redis-telemetry" title="Sync live Redis telemetry and keys">
+            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
+            <span>Sync Redis</span>
+          </button>
+          <button type="button" class="btn-hud-ghost mini text-crimson" id="btn-flush-redis-rate-keys" title="Flushes only API Shield rate limit keys">
+            Flush Rate Keys
+          </button>
+        </div>
+      </div>
+
+      <!-- Quick Telemetry Metrics Ribbon -->
+      <div class="redis-telemetry-metrics-grid">
+        <div class="redis-metric-card">
+          <span class="rm-label">SENDER REQUESTS</span>
+          <span class="rm-value font-mono text-cyan" id="rm-total-reqs">0</span>
+          <span class="rm-sub">Stored in telemetry:requests</span>
+        </div>
+        <div class="redis-metric-card highlight-amber">
+          <span class="rm-label">UNKNOWN USERS (IP ONLY)</span>
+          <span class="rm-value font-mono text-amber" id="rm-unknown-users">0</span>
+          <span class="rm-sub">Unauthenticated visitors</span>
+        </div>
+        <div class="redis-metric-card">
+          <span class="rm-label">REDIS USED MEMORY</span>
+          <span class="rm-value font-mono text-emerald" id="rm-used-memory">--</span>
+          <span class="rm-sub">Live allocation (DB 0)</span>
+        </div>
+        <div class="redis-metric-card">
+          <span class="rm-label">ACTIVE REDIS KEYS</span>
+          <span class="rm-value font-mono text-violet" id="rm-active-keys">0</span>
+          <span class="rm-sub">rate:*, slide:*, tb:*, block:*</span>
+        </div>
+        <div class="redis-metric-card">
+          <span class="rm-label">ROUNDTRIP LATENCY</span>
+          <span class="rm-value font-mono text-cyan" id="rm-latency">-- ms</span>
+          <span class="rm-sub">Ping &amp; read/write cycle</span>
+        </div>
+        <div class="redis-metric-card">
+          <span class="rm-label">STORE HEALTH</span>
+          <span class="rm-value font-mono text-emerald" id="rm-status">ONLINE</span>
+          <span class="rm-sub">Connection Pool Active</span>
+        </div>
+      </div>
+
+      <!-- Live Client Telemetry Table (Sender IP, Receiver IP, Identity, Quota, Redis Keys) -->
+      <div class="redis-subpanel" style="margin-top: 1.25rem;">
+        <div class="subpanel-head">
+          <div class="subpanel-title-row">
+            <span class="status-dot pulsing"></span>
+            <h3 class="subpanel-title">UNKNOWN USER &amp; SENDER/RECEIVER REQUEST STREAM (LIVE REDIS LOG)</h3>
+          </div>
+          <div class="subpanel-filters">
+            <div class="audit-filters">
+              <button class="filter-chip active" data-redis-filter="ALL">All Clients</button>
+              <button class="filter-chip" data-redis-filter="UNKNOWN">Unknown Users Only (IP)</button>
+              <button class="filter-chip" data-redis-filter="IDENTIFIED">Identified Keys</button>
+              <button class="filter-chip" data-redis-filter="BLOCKED">Blocked</button>
+            </div>
+            <input type="text" class="hud-input mini font-mono" id="input-search-redis-ip" placeholder="Filter by Sender IP..." style="max-width: 170px; padding: 0.25rem 0.5rem; font-size: 0.72rem;">
+          </div>
+        </div>
+
+        <div class="audit-table-wrapper" style="max-height: 280px; overflow-y: auto;">
+          <table class="audit-table font-mono" id="table-redis-telemetry">
+            <thead>
+              <tr>
+                <th>TIME</th>
+                <th>SENDER IP</th>
+                <th>RECEIVER IP (HOST)</th>
+                <th>CLIENT IDENTITY</th>
+                <th>TIER</th>
+                <th>ENDPOINT</th>
+                <th>REDIS STORAGE KEY</th>
+                <th>KEY TYPE</th>
+                <th>QUOTA / REMAIN</th>
+                <th>TTL (s)</th>
+                <th>VIOLATIONS</th>
+                <th>DECISION</th>
+                <th>ACTIONS</th>
+              </tr>
+            </thead>
+            <tbody id="redis-telemetry-body">
+              <tr>
+                <td colspan="13" class="empty-row">
+                  Connecting to live Redis... Send requests using the Mission Control above to view real-time Sender &amp; Receiver details stored in Redis.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Live Active Keys Inspector Table in Redis DB -->
+      <div class="redis-subpanel" style="margin-top: 1.25rem;">
+        <div class="subpanel-head">
+          <div class="subpanel-title-row">
+            <svg class="panel-icon highlight-violet" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px; height:16px;">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+            </svg>
+            <h3 class="subpanel-title">ACTIVE REDIS STORAGE KEYS INSPECTOR (KEYS IN DB 0)</h3>
+          </div>
+          <span class="font-mono text-muted" style="font-size: 0.75rem;">Live inspection of raw Redis rate-limit data structures</span>
+        </div>
+
+        <div class="audit-table-wrapper" style="max-height: 220px; overflow-y: auto;">
+          <table class="audit-table font-mono" id="table-redis-keys">
+            <thead>
+              <tr>
+                <th>REDIS KEY NAME</th>
+                <th>CATEGORY</th>
+                <th>DATA STRUCTURE</th>
+                <th>REMAINING TTL</th>
+                <th>STORED VALUE / STATE PREVIEW</th>
+                <th>ACTION</th>
+              </tr>
+            </thead>
+            <tbody id="redis-keys-body">
+              <tr>
+                <td colspan="6" class="empty-row">
+                  No active rate limit keys in Redis DB 0. Dispatch requests to populate keys!
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================================================================
          AI SHIELD COPILOT & THREAT INTELLIGENCE (DEEPSEEK INTEGRATION)
          =================================================================== -->
-    <section class="hud-panel card-ai-copilot" aria-label="DeepSeek AI Intelligence and Threat Analysis" style="margin-bottom: 2rem;">
+    <section class="hud-panel card-ai-copilot" id="section-ai-copilot" aria-label="DeepSeek AI Intelligence and Threat Analysis" style="margin-bottom: 2rem;">
       <div class="panel-header">
         <div class="panel-title-group">
           <svg class="panel-icon highlight-cyan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -737,7 +915,7 @@
     <!-- ===================================================================
          POLICY MANAGEMENT STUDIO
          =================================================================== -->
-    <section class="hud-panel card-policy-studio" aria-label="Rate Limiting Policy Studio">
+    <section class="hud-panel card-policy-studio" id="section-policy-studio" aria-label="Rate Limiting Policy Studio">
       <div class="panel-header">
         <div class="panel-title-group">
           <svg class="panel-icon highlight-cyan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -766,7 +944,7 @@
     <!-- ===================================================================
          SECURITY THREAT & AUDIT STREAM (EVENT LEDGER)
          =================================================================== -->
-    <section class="hud-panel card-audit" aria-label="Security Threat and Audit Stream">
+    <section class="hud-panel card-audit" id="section-audit-ledger" aria-label="Security Threat and Audit Stream">
       <div class="panel-header">
         <div class="panel-title-group">
           <svg class="panel-icon highlight-violet" viewBox="0 0 24 24" fill="none" stroke="currentColor"

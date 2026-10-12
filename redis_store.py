@@ -35,24 +35,30 @@ class RedisStore:
         self.port = port
         self.db = db
         self.backend = "unknown"
+        self.pool = None
 
         if client is not None:
             self.client = client
             self.backend = "custom"
         else:
             try:
-                # Attempt connection to real Redis
-                real_client = redis.Redis(
+                # Production-grade Connection Pool for live Redis
+                self.pool = redis.ConnectionPool(
                     host=host,
                     port=port,
                     db=db,
                     decode_responses=True,
-                    socket_connect_timeout=1.5,
+                    socket_connect_timeout=2.0,
+                    socket_timeout=2.0,
+                    socket_keepalive=True,
+                    max_connections=50,
+                    retry_on_timeout=True,
                 )
+                real_client = redis.Redis(connection_pool=self.pool)
                 real_client.ping()
                 self.client = real_client
                 self.backend = "redis"
-                logger.info(f"Connected to live Redis at {host}:{port}")
+                logger.info(f"Connected to live Redis at {host}:{port} (db={db})")
             except Exception as e:
                 if use_fallback and fakeredis is not None:
                     logger.warning(
@@ -71,6 +77,198 @@ class RedisStore:
             return bool(self.client.ping())
         except Exception:
             return False
+
+    def test_latency(self) -> float:
+        """Measures ping roundtrip latency in milliseconds."""
+        try:
+            t0 = time.perf_counter()
+            self.client.ping()
+            t1 = time.perf_counter()
+            return round((t1 - t0) * 1000.0, 2)
+        except Exception:
+            return -1.0
+
+    def test_read_write_cycle(self) -> Dict[str, Any]:
+        """Tests end-to-end write, read, and delete cycle against the Redis instance."""
+        test_key = "shield:selftest"
+        test_val = f"live_probe_{int(time.time() * 1000)}"
+        t0 = time.perf_counter()
+        try:
+            self.client.set(test_key, test_val, ex=10)
+            read_back = self.client.get(test_key)
+            self.client.delete(test_key)
+            t1 = time.perf_counter()
+            success = (read_back == test_val)
+            latency_ms = round((t1 - t0) * 1000.0, 2)
+            return {
+                "success": success,
+                "latency_ms": latency_ms,
+                "backend": self.backend,
+                "host": self.host,
+                "port": self.port,
+                "verified": success,
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "latency_ms": -1.0,
+                "error": str(e),
+                "backend": self.backend,
+            }
+
+    def get_server_info(self) -> Dict[str, Any]:
+        """
+        Retrieves real-time server information, memory, version, and database statistics.
+        Works with both live Redis server and FakeRedis.
+        """
+        try:
+            info = self.client.info() if hasattr(self.client, "info") else {}
+            version = info.get("redis_version", "unknown" if self.backend != "fakeredis" else "fakeredis-virtual")
+            uptime_sec = int(info.get("uptime_in_seconds", 0))
+            used_mem_human = info.get("used_memory_human", "in-memory")
+            used_mem_bytes = info.get("used_memory", 0)
+            clients_connected = int(info.get("connected_clients", 1))
+            total_commands = int(info.get("total_commands_processed", 0))
+            role = info.get("role", "master")
+            try:
+                db_size = self.client.dbsize()
+            except Exception:
+                db_size = 0
+
+            return {
+                "connected": self.ping(),
+                "backend": self.backend,
+                "version": version,
+                "host": self.host,
+                "port": self.port,
+                "db": self.db,
+                "uptime_seconds": uptime_sec,
+                "uptime_days": round(uptime_sec / 86400, 1),
+                "used_memory_human": used_mem_human,
+                "used_memory_bytes": used_mem_bytes,
+                "connected_clients": clients_connected,
+                "total_commands": total_commands,
+                "role": role,
+                "dbsize": db_size,
+                "latency_ms": self.test_latency(),
+            }
+        except Exception as e:
+            logger.warning(f"Failed to fetch Redis server info: {e}")
+            return {
+                "connected": self.ping(),
+                "backend": self.backend,
+                "version": "unknown",
+                "error": str(e),
+                "dbsize": 0,
+            }
+
+    def get_rate_limit_keys(self, pattern: str = "*") -> List[Dict[str, Any]]:
+        """
+        Inspects all active keys matching API Shield patterns.
+        Returns key names, data types, TTLs, categories, and representations.
+        """
+        results = []
+        try:
+            keys = self.client.keys(pattern)
+            for k in keys:
+                # Classify key category
+                category = "other"
+                if k.startswith("rate:"):
+                    category = "fixed_window"
+                elif k.startswith("slide:"):
+                    category = "sliding_window"
+                elif k.startswith("tb:"):
+                    category = "token_bucket"
+                elif k.startswith("block:"):
+                    category = "client_block"
+                elif k.startswith("violation:"):
+                    category = "violation_tracker"
+                elif k.startswith("shield:"):
+                    category = "system_probe"
+
+                try:
+                    ktype = self.client.type(k)
+                except Exception:
+                    ktype = "string"
+
+                ttl_val = self.ttl(k)
+
+                # Safe value preview
+                val_preview = ""
+                try:
+                    if ktype == "string":
+                        val_preview = str(self.client.get(k))
+                    elif ktype == "zset":
+                        card = self.client.zcard(k)
+                        val_preview = f"{card} timestamp(s)"
+                    elif ktype == "hash":
+                        val_preview = "hash table"
+                    else:
+                        val_preview = f"type: {ktype}"
+                except Exception:
+                    val_preview = "unavailable"
+
+                results.append({
+                    "key": k,
+                    "category": category,
+                    "type": ktype,
+                    "ttl": ttl_val,
+                    "value_preview": val_preview,
+                })
+        except Exception as e:
+            logger.warning(f"Error inspecting Redis keys: {e}")
+
+        # Sort so active blocks and high-traffic keys appear first
+        results.sort(key=lambda x: (x["category"] != "client_block", x["key"]))
+        return results
+
+    def clear_rate_limit_keys(self) -> int:
+        """
+        Clears only API Shield rate limit keys (rate:*, slide:*, tb:*, block:*, violation:*),
+        preserving any other data in the Redis database.
+        """
+        patterns = ["rate:*", "slide:*", "tb:*", "block:*", "violation:*", "shield:*"]
+        deleted_count = 0
+        for pat in patterns:
+            try:
+                matched = self.client.keys(pat)
+                if matched:
+                    deleted_count += int(self.client.delete(*matched))
+            except Exception as e:
+                logger.warning(f"Error clearing pattern {pat}: {e}")
+        return deleted_count
+
+    def record_request_telemetry(self, item: Dict[str, Any]) -> None:
+        """
+        Stores live client request telemetry directly in Redis under 'telemetry:requests'.
+        Retains the latest 150 requests with a 24h expiration.
+        """
+        try:
+            import json
+            raw = json.dumps(item)
+            self.client.lpush("telemetry:requests", raw)
+            self.client.ltrim("telemetry:requests", 0, 149)
+            self.client.expire("telemetry:requests", 86400)
+        except Exception as e:
+            logger.debug(f"Failed to record request telemetry in Redis: {e}")
+
+    def get_request_telemetry(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """
+        Retrieves real-time request records from Redis list 'telemetry:requests'.
+        """
+        results = []
+        try:
+            import json
+            items = self.client.lrange("telemetry:requests", 0, limit - 1)
+            for it in items:
+                try:
+                    results.append(json.loads(it))
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.warning(f"Failed to load request telemetry from Redis: {e}")
+        return results
+
 
     def increment(self, key: str, expiry: Optional[int] = None) -> int:
         """
